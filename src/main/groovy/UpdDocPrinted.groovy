@@ -5,7 +5,7 @@
  ***************************************************************************************************
  * Extension Name: EXT230MI.UpdDocPrinted
  * Type: Transaction
- * Description: This extension is being used to change value on MO header (MWOHED), field 
+ * Description: This extension is being used to change value on MO header (MWOHED), field
  *              "Order documents printed" (VHWODP).
  *
  * Date         Changed By              Version             Description
@@ -17,18 +17,22 @@ public class UpdDocPrinted extends ExtendM3Transaction {
   private final DatabaseAPI database
   private final LoggerAPI logger
   private final ProgramAPI program
+  private final MICallerAPI miCaller
   private final UtilityAPI utility
 
+  private String facility
 
   public UpdDocPrinted( final MIAPI mi,
                         final DatabaseAPI database,
                         final LoggerAPI logger,
                         final ProgramAPI program,
+                        final MICallerAPI miCaller,
                         final UtilityAPI util) {
     this.mi = mi
     this.database = database
     this.logger = logger
     this.program = program
+    this.miCaller = miCaller
     this.utility = util
   }
 
@@ -41,8 +45,41 @@ public class UpdDocPrinted extends ExtendM3Transaction {
       return
     }
 
+    // Retrieve facility
+    facility = getFacility(parameters)
+
     // Update MWOHED record
-    updateOrderDocumentsPrinted(parameters)
+    updateOrderDocumentsPrinted(parameters, facility)
+  }
+
+  /**
+   * Get facility from warehouse
+   * <p>
+   * This method getFacility checks if warehouse exists in MITWHL,
+   * using API MMS005MI.GetWarehouse. If found, facility is returned.
+   *
+   * @param  parameters  A hashmap containing all input parameters for EXT230MI.UpdDocPrinted
+   * @return  result    Facility
+   */
+  public String getFacility(Map<String, String> parameters) {
+    String result
+
+    Closure<?> output = {value ->
+      if(value["errorMessage"] != null && value["errorMessage"].toString() != "" ){
+        mi.error(value["errorMessage"].toString())
+      } else {
+        result = value["FACI"].toString()
+      }
+    }
+
+    Map<String,String> input = new HashMap<String, String>()
+    input.put("WHLO", parameters.get("WHLO"))
+    this.miCaller.setListMaxRecords(1)
+    logger.debug("MMS005MI, input: " + input)
+    this.miCaller.call("MMS005MI", "GetWarehouse", input, output)
+
+    logger.debug("MMS005MI result: " + result)
+    return result
   }
 
   /**
@@ -52,9 +89,10 @@ public class UpdDocPrinted extends ExtendM3Transaction {
    * If the update record was unsuccesful, an MI error message will be shown to the user
    *
    * @param  parameters  A hashmap containing all input parameters for EXT230MI.UpdDocPrinted
+   * @param  facility    Facility information from warehouse
    * @return void
    */
-  private void updateOrderDocumentsPrinted(Map<String, String> parameters) {
+  private void updateOrderDocumentsPrinted(Map<String, String> parameters, String facility) {
     DBAction query = database
       .table("MWOHED")
       .index("00")
@@ -63,7 +101,7 @@ public class UpdDocPrinted extends ExtendM3Transaction {
 
     DBContainer container = query.getContainer()
     container.set("VHCONO", Integer.parseInt(parameters.get("CONO")))
-    container.set("VHFACI", parameters.get("FACI"))
+    container.set("VHFACI", facility)
     container.set("VHPRNO", parameters.get("PRNO"))
     container.set("VHMFNO", parameters.get("MFNO"))
 
@@ -92,8 +130,8 @@ public class UpdDocPrinted extends ExtendM3Transaction {
  * @return   boolean     true if all input API input fields are valid, false if not
  */
   private boolean retrieveInput(Map<String, String> parameters) {
-    String cono // Company 
-    String faci // Facility (mandatory)
+    String cono // Company
+    String whlo // Warehouse (mandatory)
     String prno // Product (mandatory)
     String mfno // Manufacturing order number (mandatory)
     String wodp // Order documents printed (mandatory)
@@ -111,9 +149,9 @@ public class UpdDocPrinted extends ExtendM3Transaction {
     }
 
     // Facility
-    faci = mi.inData.get("FACI") == null ? "" : mi.inData.get("FACI").trim()
-    if (faci == "") {
-      mi.error("Facility must be entered", "FACI", "01")
+    whlo = mi.inData.get("WHLO") == null ? "" : mi.inData.get("WHLO").trim()
+    if (whlo == "") {
+      mi.error("Warehouse must be entered", "WHLO", "01")
       return false
     }
 
@@ -140,7 +178,7 @@ public class UpdDocPrinted extends ExtendM3Transaction {
 
     // Store input parameters in <parameters> hashmap
     parameters.put("CONO", cono)
-    parameters.put("FACI", faci)
+    parameters.put("WHLO", whlo)
     parameters.put("PRNO", prno)
     parameters.put("MFNO", mfno)
     parameters.put("WODP", wodp)
